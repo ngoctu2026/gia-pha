@@ -1,90 +1,34 @@
-import { createServerClient } from "@supabase/ssr";
-import { type NextRequest, NextResponse } from "next/server";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY;
-
-export async function updateSession(request: NextRequest) {
-  // If env vars are missing, we cannot create a supabase client
-  if (!supabaseUrl || !supabaseKey) {
-    if (request.nextUrl.pathname !== "/missing-db-config") {
-      const url = request.nextUrl.clone();
-      url.pathname = "/missing-db-config";
-      return NextResponse.redirect(url);
-    }
-    return NextResponse.next({ request });
-  }
-
-  let supabaseResponse = NextResponse.next({
-    request,
-  });
-
-  const supabase = createServerClient(supabaseUrl!, supabaseKey!, {
-    cookies: {
-      getAll() {
-        return request.cookies.getAll();
-      },
-      setAll(cookiesToSet) {
-        cookiesToSet.forEach(({ name, value }) =>
-          request.cookies.set(name, value),
-        );
-        supabaseResponse = NextResponse.next({
-          request,
-        });
-        cookiesToSet.forEach(({ name, value, options }) =>
-          supabaseResponse.cookies.set(name, value, options),
-        );
-      },
-    },
-  });
-
-  // Do not run code between createServerClient and
-  // supabase.auth.getUser(). A simple mistake could make it very hard to debug
-  // issues with cross-browser cookies across mobile browsers.
-  // https://supabase.com/docs/guides/auth/server-side/nextjs
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  // Protected routes
-  const protectedPaths = ["/dashboard"];
-  const isProtectedPath = protectedPaths.some((path) =>
-    request.nextUrl.pathname.startsWith(path),
-  );
-
-  const isLoginPage = request.nextUrl.pathname.startsWith("/login");
-
-  // Check if DB schema is initialized by checking if profiles table exists
-  if (isProtectedPath || isLoginPage) {
-    const { error: profileError } = await supabase
-      .from("profiles")
-      .select("id")
-      .limit(1);
-
-    if (
-      profileError &&
-      (profileError.code === "PGRST205" || profileError.code === "42P01")
-    ) {
-      const url = request.nextUrl.clone();
-      url.pathname = "/setup";
-      return NextResponse.redirect(url);
-    }
-  }
-
-  if (isProtectedPath && !user) {
-    // no user, potentially respond by redirecting the user to the login page
-    const url = request.nextUrl.clone();
-    url.pathname = "/login";
-    return NextResponse.redirect(url);
-  }
-
-  // Redirect users who are already logged in away from the login page
-  if (isLoginPage && user) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/dashboard";
-    return NextResponse.redirect(url);
-  }
-
-  return supabaseResponse;
-}
+diff --git a/utils/supabase/middleware.ts b/utils/supabase/middleware.ts
+index 8cc8eb1341282024d898941ac591611b570eff9d..42858091863a6d2a2100d59d61b68923ea9771e1 100644
+--- a/utils/supabase/middleware.ts
++++ b/utils/supabase/middleware.ts
+@@ -1,25 +1,27 @@
+ import { createServerClient } from "@supabase/ssr";
+ import { NextResponse, type NextRequest } from "next/server";
+ 
+ export async function updateSession(request: NextRequest) {
+   let response = NextResponse.next({ request });
+   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+   if (!url || !key) return response;
+ 
+   const supabase = createServerClient(url, key, {
+     cookies: {
+       getAll() {
+         return request.cookies.getAll();
+       },
+       setAll(cookiesToSet) {
+-        cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value));
++        cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+         response = NextResponse.next({ request });
+-        cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
++        cookiesToSet.forEach(({ name, value, options }) =>
++          response.cookies.set(name, value, options),
++        );
+       },
+     },
+   });
+ 
+   await supabase.auth.getUser();
+   return response;
+ }
